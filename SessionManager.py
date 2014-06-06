@@ -193,17 +193,17 @@ class XScreenSaverIdleChecker():
                 print "Can't forget GPG passphrase: %s" % e
 
 
-gclient = gconf.client_get_default()
-gvalue = gclient.get('/apps/gnome-screensaver/idle_delay')
-if gvalue is not None:
-    idle_delay = gvalue.get_int() * 60
-else:
-    # 5 minutes
-    idle_delay = 600
-
+#gclient = gconf.client_get_default()
+#gvalue = gclient.get('/apps/gnome-screensaver/idle_delay')
+#if gvalue is not None:
+#    idle_delay = gvalue.get_int() * 60
+#else:
+#    # 5 minutes
+#    idle_delay = 600
+#
 sessmgr = SessionManager()
-
-xssic = XScreenSaverIdleChecker(idle_delay)
-xssic.check_idle(sessmgr.get_smp())
+#
+#xssic = XScreenSaverIdleChecker(idle_delay)
+#xssic.check_idle(sessmgr.get_smp())
 
 gtk.main()
