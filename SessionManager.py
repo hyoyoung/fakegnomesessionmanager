@@ -95,7 +95,7 @@ class SessionManagerPresence(dbus.service.Object):
     PRESENCE_INVISIBLE  = 1
     PRESENCE_BUSY		= 2
     PRESENCE_IDLE		= 3
-    
+
     status			= PRESENCE_AVAILABLE
     status_text		= ""
 
@@ -152,7 +152,7 @@ class XScreenSaverIdleChecker():
             ('since',	   ctypes.c_ulong), # milliseconds
             ('idle',		ctypes.c_ulong), # milliseconds
             ('event_mask',  ctypes.c_ulong)] # events
-        
+
     def __init__(self, idle_timeout):
         self.idle_timeout = idle_timeout
         self.idle	= False
@@ -163,13 +163,13 @@ class XScreenSaverIdleChecker():
         self.xss.XScreenSaverAllocInfo.restype \
                 = ctypes.POINTER(self.XScreenSaverInfo)
         print ("XScreenSaverIdleChecker ready with timeout %d" % idle_timeout)
-    
+
     def check_idle(self, smp):
         #print "Checking idleness..."
         xss_info = self.xss.XScreenSaverAllocInfo()
         self.xss.XScreenSaverQueryInfo(self.dpy, self.root, xss_info)
         idle = xss_info.contents.idle/1000
-        
+
         if idle >= self.idle_timeout:
             if not self.idle:
                 #print "Becoming idle"
@@ -181,9 +181,9 @@ class XScreenSaverIdleChecker():
                 #print "Not idle anymore"
                 self.idle = False
                 smp.StatusChanged(smp.PRESENCE_AVAILABLE)
-        
+
         gobject.timeout_add(10000, self.check_idle, smp)
-    
+
     def forget_gpg_passphrases(self):
         if os.environ.has_key("GPG_AGENT_INFO"):
             gpg_agent_pid = int(os.environ['GPG_AGENT_INFO'].split(":")[1])
