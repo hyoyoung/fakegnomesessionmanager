@@ -1,0 +1,246 @@
+<flattr>
+align=right
+</flattr>
+
+====== Gnome Screensaver without Gnome Session ======
+
+I'm not using Gnome. I got too used to how [[http://www.fvwm.org/|Fvwm]] and [[scm>svn/shtrom/browser/default-env/confs/fvwm2rc|my carefully crafted configuration]] works to be fully satisfied with anything which behaves differently. However, I like Gnome Screensaver, because it has nicer widgets as compared to Xscreensaver. Unfortunately, sometime in 2009, all my machines stopped locking after enough time has passed to be considered idle (and it seems [[http://forums.fedoraforum.org/archive/index.php/t-229610.html|I am]] [[http://forums.gentoo.org/viewtopic-t-860175-start-0.html|not]] [[https://bugzilla.redhat.com/show_bug.cgi?id=506847|alone]]).
+
+I eventually sat down and worked out the problem, which is that Gnome
+Screensaver
+[[http://svn.gnome.org/viewvc/gnome-screensaver/trunk/src/gs-watcher-x11.c?r1=1578&r2=1577&pathrev=1578|solely
+relies on Gnome Session for idleness detection since the 18th of January 2009]].
+So, I reimplemented the
+[[scm>svn/shtrom/browser/default-env/bin/SessionManager.py|bare minimum of a
+SessionManager replacement in Python]]. It fakes the existence of
+''org.gnome.%%SessionManager%%'' and provides idle monitoring from X11 via
+''org.gnome.%%SessionManager%%.Presence''.
+
+Along the way, I gather various pieces of information about implementing D-BUS
+services, pretending to be the Gnome Session Manager, and checking the X11
+status, all in Python. Most of the code is presented below, with short
+explanations, but the full script is available
+[[scm>svn/shtrom/browser/default-env/bin/SessionManager.py|from there]].
+
+===== Python and D-BUS =====
+
+There are D-BUS bindings for Python. They provide decorators for Python classes' methods which transparently allow mapping D-BUS calls to them.
+
+==== D-BUS Instance ====
+
+Creating a class which provides a D-BUS interface is fairly easy. A class inheriting from ''dbus.service.Object'' has to be derived. Then, an instance of this class will connect to the message bus as the named service.
+<code python>
+import dbus
+import dbus.service
+import dbus.glib
+
+ogSM   = 'org.gnome.SessionManager'
+ogSMp  = '/org/gnome/SessionManager'
+
+class SessionManager(dbus.service.Object):
+  def __init__(self):
+    bus_name = dbus.service.BusName(ogSM,
+            bus=dbus.SessionBus())
+    dbus.service.Object.__init__(self, bus_name,
+            ogSMp)
+    self.presence = SessionManagerPresence()
+</code>
+
+Gnome Screensaver looks for the %%SessionManager%% service, or complains as follows.
+<code consoleio>
+$ <in>gnome-screensaver</in>
+
+** (gnome-screensaver:7099): WARNING **: Failed to get session presence proxy:
+Could not get owner of name 'org.gnome.SessionManager': no such name
+</code>
+
+However, as far as my intentions are concerned, it doesn't seem to use it
+further. The real goal is to implement the ''org.gnome.%%SessionManager%%.Presence''
+service. The beginning is rather similar, apart from some additional variables
+which will soon prove handy.
+<code python>
+ogSMP   = 'org.gnome.SessionManager.Presence'
+ogSMPp  = '/org/gnome/SessionManager/Presence'
+
+class SessionManagerPresence(dbus.service.Object):
+  PRESENCE_AVAILABLE  = 0
+  PRESENCE_INVISIBLE  = 1
+  PRESENCE_BUSY       = 2
+  PRESENCE_IDLE       = 3
+  
+  status              = PRESENCE_AVAILABLE
+  status_text         = ""
+  
+  def __init__(self):
+          bus_name = dbus.service.BusName(ogSMP,
+                  bus=dbus.SessionBus())
+          dbus.service.Object.__init__(self, bus_name,
+                  ogSMPp)
+</code>
+
+==== D-BUS Methods ====
+D-BUS Methods can be added to a ''dbus.service.Object'' (or
+''dbus.service.Interface'') using the ''@dbus.service.method'' decorator. I
+therefore proceeded to implement its
+[[http://people.gnome.org/~mccann/gnome-session/docs/gnome-session.html#org.gnome.%%SessionManager%%.Presence|documented methods]]. The decorator contains the name of the implemented interface (each object can implement several) as well as the input and output schema (of both the Python method and the D-BUS call they implement). These schemata are represented as string, with one character per variable. The character can be ''s'' for string or ''u'' for unsigned integer. There are other types, but they are not relevant to this document. 
+<code python>
+  @dbus.service.method(dbus_interface=ogSMP, in_signature='u')
+  def SetStatus(self, status):
+    self.status = status
+  
+  @dbus.service.method(dbus_interface=ogSMP, in_signature='u')
+  def SetStatusText(self, status_text):
+    self.status_text = status_text
+</code>
+  
+
+==== D-BUS Properties ====
+Getters and setters for object properties are specific as they follow a common scheme, provided by interface ''org.freedesktop.DBus.Properties'' (''dbus.PROPERTIES_IFACE'' in Python). This interface provides the ''%%GetAll%%'', ''Get'' and ''Set'' methods.
+<code python>
+  @dbus.service.method(dbus_interface=dbus.PROPERTIES_IFACE,
+    in_signature='s', out_signature='a{sv}')
+  def GetAll(self, interface_name):
+    return {'status':     dbus.UInt32(self.status),
+        'status-text':  self.status_text,
+        }
+  @dbus.service.method(dbus_interface=dbus.PROPERTIES_IFACE,
+    in_signature='ss', out_signature='v')
+  def Get(self, interface_name, property_name):
+    return self.GetAll(interface_name)[property_name]
+  @dbus.service.method(dbus_interface=dbus.PROPERTIES_IFACE,
+    in_signature='ssv')
+  def Set(self, interface_name, property_name, value):
+    pass
+</code>
+Note: If one were to code this more cleanly, these methods should first inspect that the ''interface_name'' corresponds to one they implement, or raise an Exception.
+
+Failure to implement them would result in Gnome Screensaver complaining thusly.
+<code consoleio>
+$ <in>gnome-screensaver</in>
+
+** (gnome-screensaver:9109): WARNING **: Couldn't get presence status: Traceback (most recent call last):
+UnknownMethodException: org.freedesktop.DBus.Error.UnknownMethod: Unknown method: Get is not a valid method of interface org.freedesktop.DBus.Properties
+</code>
+
+==== D-BUS Signals ====
+When the system becomes idle, Gnome Screensaver expects a signal from the
+%%SessionManager%%. The ''@dbus.service.signal'' is used to mark methods which,
+after having run, will send a signal with their name and arguments on the bus.
+These signal-sending methods can still be used normally, //e.g.// to update the
+instance's state.
+<code python>
+  @dbus.service.signal(dbus_interface=ogSMP, signature='u')
+  def StatusChanged(self, status):
+    self.SetStatus(status)
+
+  @dbus.service.signal(dbus_interface=ogSMP, signature='s')
+  def StatusTextChanged(self, status_text):
+      self.SetStatusText(status_text)
+</code>
+
+===== Python and XIDLE =====
+Python can be used to load and call C libraries. This is handy as we can bind the X11 library, and access XIDLE information.
+
+We first need a class to be mapped onto a C structure.
+<code python>
+import ctypes
+
+class XScreenSaverInfo(ctypes.Structure):
+  """ typedef struct { ... } XScreenSaverInfo; """
+  _fields_ = [('window',      ctypes.c_ulong), # screen saver window
+    ('state',       ctypes.c_int),   # off,on,disabled
+    ('kind',        ctypes.c_int),   # blanked,internal,external
+    ('since',       ctypes.c_ulong), # milliseconds
+    ('idle',        ctypes.c_ulong), # milliseconds
+    ('event_mask',  ctypes.c_ulong)] # events
+</code>
+
+This structure is then used as part of a handy object which periodically performs the idle check via libX11, and raises the necessary signals when relevant using our previously defined %%SessionManager%% impersonators.
+<code python>
+import os
+import gobject
+
+class XScreenSaverIdleChecker():
+  def __init__(self, idle_timeout):
+    self.idle_timeout = idle_timeout
+    self.idle       = False
+    self.xlib       = ctypes.cdll.LoadLibrary('libX11.so')
+    self.dpy        = self.xlib.XOpenDisplay(os.environ['DISPLAY'])
+    self.root       = self.xlib.XDefaultRootWindow(self.dpy)
+    self.xss        = ctypes.cdll.LoadLibrary('libXss.so')
+    self.xss.XScreenSaverAllocInfo.restype \
+  		  = ctypes.POINTER(XScreenSaverInfo)
+    print "XScreenSaverIdleChecker ready with timeout %d" % idle_timeout
+  
+  def check_idle(self, smp):
+    xss_info = self.xss.XScreenSaverAllocInfo()
+    self.xss.XScreenSaverQueryInfo(self.dpy, self.root, xss_info)
+    idle = xss_info.contents.idle/1000
+    
+    if idle >= self.idle_timeout:
+        if not self.idle:
+  	  self.idle = True
+  	  smp.StatusChanged(smp.PRESENCE_IDLE)
+    else:
+        if self.idle:
+  	  self.idle = False
+  	  smp.StatusChanged(smp.PRESENCE_AVAILABLE)
+    
+    gobject.timeout_add(10000, self.check_idle, smp)
+</code>
+
+===== Puting It All Together =====
+The code above is finally used, with the proper Screensaver timeout from GConf, in a
+GTK main loop.
+<code python>
+import gtk
+import gconf
+
+gclient = gconf.client_get_default()
+gvalue = gclient.get('/apps/gnome-screensaver/idle_delay')
+idle_delay = gvalue.get_int() * 60
+
+sessmgr = SessionManager() # The SessionManager' __init__() function now instanciates a SessionManagerPresence
+
+xssic = XScreenSaverIdleChecker(idle_delay)
+xssic.check_idle(sessmgr.get_smp())
+
+gtk.main()
+</code>
+
+:!: Cyril Roussillon at http://crteknologies.fr/ just made this remark that, for this to work adequately for him, he needs to use ''desktop/gnome/session/idle_delay'' instead of ''/apps/gnome-screensaver/idle_delay'' as this last value does not seem to change. I haven't tested it myself, but it may be worth investigating. Thanks Cyril!
+
+:!: Neven Cosic contributed a few patches against [[scm>svn/shtrom/browser/default-env/bin/SessionManager.py?rev=976|revision 976 of my script]] to support ''{{:projets:sessionmanager.py-dconf.diff|dconf}}'', ''{{:projets:sessionmanager.py-gset.diff|gset}}'' and {{:projets:sessionmanager-gio.diff|Gio}} for better Gnome 3/Mate 1.5 support of GSettings (the latter is probably the one you want). Thanks Neven!
+===== Bonus: Trying to Forget GPG Passphrases ======
+
+I'm using GPG and an [[tips:openpgpsmartcard|OpenPGP SmartCard]] for cryptography-related things, but also for login. If the passphrase is cached by the agent, it's not asked again for any authentication purposes. To properly lock the screen, and make sure it remains so until I come back, the GPG Agent must be instructed to forget my passphrase. Fortunately, it will do so upon receiving a SIGHUP signal. The following function takes care of that.
+<code python>
+  def forget_gpg_passphrases(self):
+    if os.environ.has_key("GPG_AGENT_INFO"):
+      gpg_agent_pid = int(os.environ['GPG_AGENT_INFO'].split(":")[1])
+      try:
+        os.kill(gpg_agent_pid, signal.SIGHUP)
+      except Exception, e:
+        print "Can't forget GPG passphrase: %s" % e
+</code>
+
+Unfortunately, this doesn't seem to work. And [[https://bugs.g10code.com/gnupg/issue1344|here's why]].
+
+===== Conclusion =====
+
+I understand the push for a move to a whole Gnome-based desktop in the code of the supporting applications, and don't want to belittle those good guys' integration efforts. However, I'm not sure I agree with the removal of too many generic options, thereby introducing mandatory dependencies on other Gnome components. It feels to me it goes against the old school Unix philosophy of doing one thing, and doing it well. Anyway, I now have a working Screensaver again, and learnt a bit more about D-BUS and Python-C interactions in the process, so it didn't end too badly, I guess...
+
+===== References =====
+
+In the following pages, I found nuggets of information, that when combined
+together, greatly helped me create this flavourey drop-in replacement for the Gnome
+%%SessionManager%%. 
+  - W.J. %%McCann%%, [[http://people.gnome.org/~mccann/gnome-session/docs/gnome-session.html|GNOME Session 2.26.3 Documentation]]
+  - A.M. Kuchling, [[http://www.amk.ca/diary/2007/04/rough_notes_python_and_dbus.html|Rough notes: Python and D-Bus]]
+  - majyk, [[http://paste.lisp.org/display/45824|Paste number 45824: python dbus example]]
+  - A.Launi //et al.//, [[http://www.lamalex.net/2010/03/help-does-anyone-know-how-to-export-properties-with-python-dbus/|HELP! Does anyone know how to export properties with python-dbus??]]
+  - T. Perl, [[http://thp.io/2007/09/x11-idle-time-and-focused-window-in.html|X11 idle time and focused window in Python]]
+  - S.-A. Gevatter Pujals, [[http://www.eurion.net/python-snippets/snippet/GConf%3A%20get_set%20values.html|GConf: get/set values]]
+  - T. Zullinger, [[http://lists.gnupg.org/pipermail/gnupg-users/2006-March/028189.html|How to tell the gpg agent to forget a passphrase]]
+
+{{tag>project Python code Gnome screensaver sessionmanagec dbus xidle x11}}

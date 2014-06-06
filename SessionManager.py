@@ -20,6 +20,9 @@ Loosely based on basic instructions at [0,1,2,3,5,6].
 Add Inhibit method at [7]
 [7] https://people.gnome.org/~mccann/gnome-session/docs/gnome-session.html#org.gnome.SessionManager.Inhibit
 
+Original Authors Page
+http://www.narf.ssji.net/~shtrom/wiki/projets/gnomescreensavernosession
+
 ---
 
 Redistribution and use in source and binary forms, with or without
