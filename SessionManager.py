@@ -16,6 +16,12 @@ Loosely based on basic instructions at [0,1,2,3,5,6].
 [5] http://www.eurion.net/python-snippets/snippet/GConf%3A%20get_set%20values.html
 [6] http://lists.gnupg.org/pipermail/gnupg-users/2006-March/028189.html
 
+---
+Add Inhibit method at [7]
+[7] https://people.gnome.org/~mccann/gnome-session/docs/gnome-session.html#org.gnome.SessionManager.Inhibit
+
+---
+
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
 are met:
@@ -66,6 +72,8 @@ ogSMP	= 'org.gnome.SessionManager.Presence'
 ogSMPp	= '/org/gnome/SessionManager/Presence'
 
 class SessionManager(dbus.service.Object):
+    inhibit_cookie = 0xdeadbeef
+
     def __init__(self):
         bus_name = dbus.service.BusName(ogSM,
             bus=dbus.SessionBus())
@@ -77,6 +85,10 @@ class SessionManager(dbus.service.Object):
     def get_smp(self):
         return self.presence
 
+    @dbus.service.method(dbus_interface=ogSM,
+                         in_signature='susu', out_signature='u')
+    def Inhibit(self, app_id, toplevel_xid, reason, flags):
+        return self.inhibit_cookie
 
 class SessionManagerPresence(dbus.service.Object):
     PRESENCE_AVAILABLE  = 0
