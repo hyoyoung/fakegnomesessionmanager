@@ -1,4 +1,4 @@
-#!/bin/env python2
+#!/usr/bin/env python
 """
 SessionManager
 Copyright (c) 2010--2011, Olivier Mehani <shtrom@ssji.net>
